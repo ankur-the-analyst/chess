@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grandmaster Chess</title>
+    
+    <!-- Tailwind CSS for layout and general styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome for high-quality scalable chess piece icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Chess.js for complete and accurate chess logic (rules, moves, state) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    
+    <style>
+        /* Google Fonts */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        
+        :root {
+            /* Classic Chess.com-style green/off-white board colors */
+            --light-sq: #ebecd0;
+            --dark-sq: #739552;
+            --highlight: rgba(246, 246, 105, 0.6);
+            --last-move: rgba(246, 246, 105, 0.4);
+            --check: radial-gradient(circle, rgba(255, 51, 51, 0.9) 10%, rgba(255, 51, 51, 0) 80%);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827; /* Tailwind gray-900 */
+            color: #f3f4f6;
+        }
+
+        /* Container queries allow perfect responsive font-sizing for pieces */
+        #board-container {
+            container-type: inline-size;
+        }
+
+        #board {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            width: 100%;
+            aspect-ratio: 1/1;
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.6);
+            border: 8px solid #374151; /* Tailwind gray-700 */
+            background-color: #374151;
+        }
+
+        .square {
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .light { background-color: var(--light-sq); }
+        .dark { background-color: var(--dark-sq); }
+        
+        .selected { background-color: var(--highlight) !important; }
+        .last-move { background-color: var(--last-move); }
+        .in-check::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: var(--check);
+            z-index: 1;
+        }
+
+        /* Chess Piece Styling */
+        .piece {
+            font-size: 8.5cqw; /* Relies on container-type to scale perfectly with board */
+            z-index: 10;
+            transition: transform 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .piece:hover {
+            transform: scale(1.15) translateY(-5%);
+        }
+
+        .piece-w {
+            color: #ffffff;
+            -webkit-text-stroke: 1.5px #111;
+            filter: drop-shadow(0px 6px 4px rgba(0, 0, 0, 0.6));
+        }
+
+        .piece-b {
+            color: #1a1a1a;
+            -webkit-text-stroke: 1px #000;
+            filter: drop-shadow(0px 4px 3px rgba(255, 255, 255, 0.2));
+        }
+
+        /* Move target hints */
+        .move-hint {
+            position: absolute;
+            width: 30%;
+            height: 30%;
+            background-color: rgba(0, 0, 0, 0.15);
+            border-radius: 50%;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        .capture-hint {
+            width: 100%;
+            height: 100%;
+            background: transparent;
+            border: 7px solid rgba(0, 0, 0, 0.15);
+            border-radius: 50%;
+        }
+
+        /* Board Coordinates */
+        .coord-file { position: absolute; bottom: 2px; right: 4px; font-size: clamp(0.6rem, 2cqw, 0.9rem); font-weight: 700; z-index: 2; pointer-events: none;}
+        .coord-rank { position: absolute; top: 2px; left: 4px; font-size: clamp(0.6rem, 2cqw, 0.9rem); font-weight: 700; z-index: 2; pointer-events: none;}
+        .light .coord-file, .light .coord-rank { color: var(--dark-sq); }
+        .dark .coord-file, .dark .coord-rank { color: var(--light-sq); }
+
+        /* Custom Scrollbar for Move History */
+        #history-box::-webkit-scrollbar { width: 6px; }
+        #history-box::-webkit-scrollbar-track { background: transparent; }
+        #history-box::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
+        #history-box::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        
+        /* Modal Animation */
+        @keyframes popIn {
+            0% { transform: scale(0.9); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .modal-animate { animation: popIn 0.2s ease-out forwards; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4 lg:p-8">
+
+    <!-- Header -->
+    <div class="mb-6 text-center">
+        <h1 class="text-4xl md:text-5xl font-bold tracking-tight text-white mb-2 drop-shadow-lg">
+            <i class="fa-solid fa-chess-knight text-gray-400 mr-2"></i>Grandmaster Chess
+        </h1>
+        <p class="text-gray-400 font-medium">Local 2-Player Game</p>
+    </div>
+
+    <!-- Main Game Layout (Board + Sidebar) -->
+    <div class="flex flex-col lg:flex-row gap-8 w-full max-w-6xl justify-center items-start">
+        
+        <!-- Chess Board Section -->
+        <div class="w-full max-w-[600px] flex flex-col mx-auto" id="board-container">
+            <!-- Top Player Info -->
+            <div class="flex justify-between items-center mb-3 text-gray-300 font-semibold px-2">
+                <div class="flex items-center gap-2">
+                    <div class="w-8 h-8 rounded bg-gray-800 border border-gray-600 flex items-center justify-center">
+                        <i class="fa-solid fa-user text-sm"></i>
+                    </div>
+                    <span>Black</span>
+                </div>
+            </div>
+
+            <!-- The Board -->
+            <div class="relative">
+                <div id="board"></div>
+                
+                <!-- Promotion Modal Overlay -->
+                <div id="promotion-modal" class="hidden absolute inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm rounded">
+                    <div class="bg-gray-800 p-6 rounded-xl shadow-2xl modal-animate border border-gray-600 text-center">
+                        <h3 class="text-xl font-bold text-white mb-4">Choose Promotion</h3>
+                        <div class="flex gap-4" id="promotion-choices">
+                            <!-- Buttons populated by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom Player Info -->
+            <div class="flex justify-between items-center mt-3 text-gray-300 font-semibold px-2">
+                <div class="flex items-center gap-2">
+                    <div class="w-8 h-8 rounded bg-gray-100 border border-gray-300 flex items-center justify-center">
+                        <i class="fa-solid fa-user text-sm text-gray-800"></i>
+                    </div>
+                    <span>White</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar / Control Panel -->
+        <div class="w-full max-w-[400px] lg:w-[350px] bg-gray-800 rounded-xl shadow-2xl border border-gray-700 flex flex-col overflow-hidden mx-auto h-[600px]">
+            
+            <!-- Game Status Banner -->
+            <div id="status-banner" class="p-4 bg-gray-700 border-b border-gray-600 text-center transition-colors duration-300">
+                <h2 id="status-text" class="text-xl font-bold text-white">White to move</h2>
+            </div>
+
+            <!-- Move History -->
+            <div class="flex-grow p-4 flex flex-col overflow-hidden bg-[#1e293b]">
+                <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-3">Move History</h3>
+                <div id="history-box" class="flex-grow overflow-y-auto pr-2 space-y-1">
+                    <!-- History rows go here -->
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="p-4 bg-gray-800 border-t border-gray-700 grid grid-cols-2 gap-3">
+                <button onclick="undoMove()" class="py-2.5 px-4 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-rotate-left"></i> Undo
+                </button>
+                <button onclick="resetGame()" class="py-2.5 px-4 bg-red-600 hover:bg-red-500 text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-trash"></i> Reset
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script>
+        // --- Game State Variables ---
+        let game = new Chess();
+        const boardEl = document.getElementById('board');
+        const statusText = document.getElementById('status-text');
+        const statusBanner = document.getElementById('status-banner');
+        const historyBox = document.getElementById('history-box');
+        const promotionModal = document.getElementById('promotion-modal');
+        const promotionChoices = document.getElementById('promotion-choices');
+
+        let selectedSquare = null;
+        let validMoves = [];
+        let lastMove = null; // To highlight previous move {from, to}
+        let pendingPromotionMove = null;
+
+        // Map piece types to FontAwesome classes
+        const faPieceMap = {
+            'k': 'fa-chess-king',
+            'q': 'fa-chess-queen',
+            'r': 'fa-chess-rook',
+            'b': 'fa-chess-bishop',
+            'n': 'fa-chess-knight',
+            'p': 'fa-chess-pawn'
+        };
+
+        // --- Initialization ---
+        function init() {
+            renderBoard();
+            updateStatus();
+        }
+
+        // --- Render Logic ---
+        function renderBoard() {
+            boardEl.innerHTML = '';
+            const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+            
+            // Render from Rank 8 to 1 (White at bottom)
+            for (let r = 8; r >= 1; r--) {
+                for (let c = 0; c < 8; c++) {
+                    const sq = files[c] + r;
+                    const piece = game.get(sq);
+                    const isLight = (r + c) % 2 !== 0;
+
+                    const sqEl = document.createElement('div');
+                    sqEl.className = `square ${isLight ? 'light' : 'dark'}`;
+                    sqEl.dataset.square = sq;
+
+                    // 1. Highlight Last Move
+                    if (lastMove && (lastMove.from === sq || lastMove.to === sq)) {
+                        sqEl.classList.add('last-move');
+                    }
+
+                    // 2. Highlight Selected Square
+                    if (selectedSquare === sq) {
+                        sqEl.classList.add('selected');
+                    }
+
+                    // 3. Highlight King in Check
+                    if (piece && piece.type === 'k' && piece.color === game.turn() && game.in_check()) {
+                        sqEl.classList.add('in-check');
+                    }
+
+                    // 4. Highlight Valid Move Hints
+                    const move = validMoves.find(m => m.to === sq);
+                    if (move) {
+                        const hintEl = document.createElement('div');
+                        hintEl.className = 'move-hint';
+                        if (piece) hintEl.classList.add('capture-hint'); // Hollow circle for captures
+                        sqEl.appendChild(hintEl);
+                    }
+
+                    // 5. Draw Piece
+                    if (piece) {
+                        const pEl = document.createElement('i');
+                        pEl.className = `fa-solid ${faPieceMap[piece.type]} piece piece-${piece.color}`;
+                        sqEl.appendChild(pEl);
+                    }
+
+                    // 6. Draw Coordinates (on edges)
+                    if (c === 0) {
+                        const rankEl = document.createElement('span');
+                        rankEl.className = 'coord-rank';
+                        rankEl.innerText = r;
+                        sqEl.appendChild(rankEl);
+                    }
+                    if (r === 1) {
+                        const fileEl = document.createElement('span');
+                        fileEl.className = 'coord-file';
+                        fileEl.innerText = files[c];
+                        sqEl.appendChild(fileEl);
+                    }
+
+                    // 7. Event Listener
+                    sqEl.addEventListener('click', () => handleSquareClick(sq));
+                    
+                    boardEl.appendChild(sqEl);
+                }
+            }
+        }
+
+        // --- Interaction Logic ---
+        function handleSquareClick(sq) {
+            // Ignore clicks if game is over or awaiting promotion input
+            if (game.game_over() || pendingPromotionMove) return;
+
+            // Check if clicked square is a valid target for the selected piece
+            const move = validMoves.find(m => m.to === sq);
+            
+            if (move) {
+                // If the move requires promotion, show modal instead of executing immediately
+                if (move.flags.includes('p') || move.promotion) {
+                    showPromotionModal(move);
+                } else {
+                    executeMove(move);
+                }
+                return;
+            }
+
+            // Otherwise, check if user clicked their own piece to select it
+            const piece = game.get(sq);
+            if (piece && piece.color === game.turn()) {
+                selectedSquare = sq;
+                // Get valid moves for this square (verbose returns objects with details)
+                validMoves = game.moves({ square: sq, verbose: true });
+            } else {
+                // Deselect if clicking empty space or enemy piece (without selecting own piece first)
+                selectedSquare = null;
+                validMoves = [];
+            }
+            
+            renderBoard();
+        }
+
+        function executeMove(moveObj) {
+            const result = game.move(moveObj);
+            if (result) {
+                selectedSquare = null;
+                validMoves = [];
+                lastMove = { from: result.from, to: result.to };
+                renderBoard();
+                updateStatus();
+                renderHistory();
+            }
+        }
+
+        // --- Promotion Handling ---
+        function showPromotionModal(baseMove) {
+            pendingPromotionMove = baseMove;
+            promotionChoices.innerHTML = '';
+            
+            const pieces = ['q', 'r', 'b', 'n'];
+            const color = game.turn();
+            
+            pieces.forEach(p => {
+                const btn = document.createElement('button');
+                btn.className = `w-16 h-16 rounded-lg bg-gray-700 hover:bg-gray-600 flex items-center justify-center transition-colors border-2 border-gray-500 hover:border-gray-300`;
+                btn.innerHTML = `<i class="fa-solid ${faPieceMap[p]} text-4xl piece-${color}"></i>`;
+                btn.onclick = () => {
+                    baseMove.promotion = p;
+                    promotionModal.classList.add('hidden');
+                    executeMove(baseMove);
+                    pendingPromotionMove = null;
+                };
+                promotionChoices.appendChild(btn);
+            });
+
+            promotionModal.classList.remove('hidden');
+        }
+
+        // --- UI Updates ---
+        function updateStatus() {
+            let status = '';
+            let moveColor = game.turn() === 'w' ? 'White' : 'Black';
+            
+            // Reset banner colors
+            statusBanner.className = 'p-4 border-b text-center transition-colors duration-300';
+
+            if (game.in_checkmate()) {
+                status = `Checkmate! ${moveColor === 'White' ? 'Black' : 'White'} wins.`;
+                statusBanner.classList.add('bg-green-700', 'border-green-600');
+            } else if (game.in_draw()) {
+                status = 'Game Drawn!';
+                if (game.in_stalemate()) status += ' (Stalemate)';
+                else if (game.in_threefold_repetition()) status += ' (Repetition)';
+                else if (game.insufficient_material()) status += ' (Insufficient Material)';
+                statusBanner.classList.add('bg-yellow-700', 'border-yellow-600');
+            } else {
+                status = `${moveColor} to move`;
+                if (game.in_check()) {
+                    status += ' - IN CHECK!';
+                    statusBanner.classList.add('bg-red-800', 'border-red-700');
+                } else {
+                    statusBanner.classList.add('bg-gray-700', 'border-gray-600');
+                }
+            }
+            
+            statusText.innerText = status;
+        }
+
+        function renderHistory() {
+            const history = game.history();
+            historyBox.innerHTML = '';
+            
+            for (let i = 0; i < history.length; i += 2) {
+                const row = document.createElement('div');
+                row.className = 'flex justify-between items-center px-3 py-2 bg-gray-800 rounded mb-1 text-sm';
+                
+                const num = document.createElement('span');
+                num.className = 'w-8 text-gray-500 font-semibold';
+                num.innerText = `${(i / 2 + 1)}.`;
+                
+                const wMove = document.createElement('span');
+                wMove.className = 'w-16 font-medium text-gray-200';
+                wMove.innerText = history[i];
+                
+                const bMove = document.createElement('span');
+                bMove.className = 'w-16 font-medium text-gray-200 text-right';
+                bMove.innerText = history[i + 1] ? history[i + 1] : '';
+
+                row.appendChild(num);
+                row.appendChild(wMove);
+                row.appendChild(bMove);
+                historyBox.appendChild(row);
+            }
+            
+            // Auto scroll to bottom
+            historyBox.scrollTop = historyBox.scrollHeight;
+        }
+
+        // --- Controls ---
+        function undoMove() {
+            if(pendingPromotionMove) {
+                pendingPromotionMove = null;
+                promotionModal.classList.add('hidden');
+                return;
+            }
+            game.undo();
+            selectedSquare = null;
+            validMoves = [];
+            
+            // Find what the new "last move" was (if any)
+            const historyObj = game.history({ verbose: true });
+            if (historyObj.length > 0) {
+                const prev = historyObj[historyObj.length - 1];
+                lastMove = { from: prev.from, to: prev.to };
+            } else {
+                lastMove = null;
+            }
+
+            renderBoard();
+            updateStatus();
+            renderHistory();
+        }
+
+        function resetGame() {
+            if(pendingPromotionMove) {
+                promotionModal.classList.add('hidden');
+                pendingPromotionMove = null;
+            }
+            game.reset();
+            selectedSquare = null;
+            validMoves = [];
+            lastMove = null;
+            renderBoard();
+            updateStatus();
+            renderHistory();
+        }
+
+        // Boot the game
+        window.onload = init;
+    </script>
+</body>
+</html>
